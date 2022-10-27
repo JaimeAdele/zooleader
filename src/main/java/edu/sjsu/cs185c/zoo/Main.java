@@ -105,8 +105,13 @@ public class Main {
         }
       }
 
-      System.out.println("-----watching for /readyforlunch creation");
-      zk.exists(lunch_path+"/readyforlunch", (e) -> {watchForCreateReady(e);});
+      if (zk.exists(lunch_path+"/readyforlunch", false) == null) {
+        System.out.println("-----watching for /readyforlunch creation");
+        zk.exists(lunch_path+"/readyforlunch", (e) -> {watchForCreateReady(e);});
+      } else {
+        readyforlunchCreated();
+      }
+
 
 
       server.awaitTermination();
