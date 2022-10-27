@@ -33,6 +33,7 @@ public class Main {
   public static ZooKeeper zk;
   public static String hostPort;
   public static long lunchZxid;
+  public static long readyZxid;
   public static List<String> attendees = new ArrayList<>();
   public static boolean skip = false;
   public static int sleepTimer = 0;
@@ -42,7 +43,7 @@ public class Main {
     @Override
     public void audit(GrpcZooleader.AuditRequest request, StreamObserver<GrpcZooleader.AuditResponse> responseObserver) {
       System.out.println("-----AUDIT REQUEST RECEIVED");
-      var response = GrpcZooleader.AuditResponse.newBuilder().setLunchZxid(lunchZxid).setLeader(getLeader()).addAllAttendees(getAttendees()).build();
+      var response = GrpcZooleader.AuditResponse.newBuilder().setLunchZxid(lunchZxid).setLeader(getLeader()).addAllAttendees(attendees).build();
       responseObserver.onNext(response);
       responseObserver.onCompleted();
       System.out.println("-----AUDIT REQUEST FINISHED");
@@ -124,6 +125,13 @@ public class Main {
 
   // this gets passed into zk.exists() function if /readyforlunch is not expected to exist yet
   public static void watchForCreateReady(WatchedEvent e) {
+    try {
+      Stat stat = new Stat();
+      zk.getData(lunch_path+"/readyforlunch", false, stat);
+      readyZxid = stat.getCzxid();
+    } catch (Exception exception) {
+      exception.printStackTrace();
+    }  
     // when triggered, watcher should:
       // if node indeed exists now:
       if (e.getType() == EventType.NodeCreated) {
@@ -161,7 +169,7 @@ public class Main {
           zk.exists(lunch_path+"/readyforlunch", (e2) -> {watchForDeleteReady(e2);});
           // if you are leader, create /pastlunches node
           if (leader.equals(name)) {
-            List<String> attendees = getAttendees();
+            setAttendees();
             String data = name+" went to "+restaurant+" with ";
             for (String attendee : attendees) {
               if (!attendee.equals("zk-"+name)) {
@@ -295,6 +303,7 @@ public class Main {
       System.out.println("-----leader node created");
     } catch (Exception e) {
       System.out.println("-----LEADER NODE NOT CREATED");
+      attendees = new ArrayList<String>();
       watchForDeleteLeader();
       if (sleepTimer > 0) sleepTimer -= 1000;
     }
@@ -329,19 +338,21 @@ public class Main {
     }
   }
 
-  public static List<String> getAttendees() {
+  public static void setAttendees() {
     attendees = new ArrayList<>();
     try {
       List<String> children = zk.getChildren(lunch_path, false);
       for (String child : children) {
-        if (child.substring(0,3).equals("zk-")) {
+        Stat stat = new Stat();
+        zk.getData(lunch_path+"/"+child, false, stat);
+        long childZxid = stat.getCzxid();
+        if (child.substring(0,3).equals("zk-") && childZxid > readyZxid && childZxid < lunchZxid) {
           attendees.add(child);
         }
       }
     } catch (Exception e) {
       e.printStackTrace();
     }
-    return attendees;
   }
 
   public static String getLeader() {
